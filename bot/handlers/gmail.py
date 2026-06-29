@@ -37,6 +37,7 @@ EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
 @router.callback_query(F.data == "gmail:list")
 async def process_list_accounts(callback: CallbackQuery, db_user: User):
+    assert callback.message is not None
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(GmailAccount).where(GmailAccount.user_id == db_user.id)
@@ -49,7 +50,7 @@ async def process_list_accounts(callback: CallbackQuery, db_user: User):
         lines = [f"• `{acc.email}`" for acc in accounts]
         text = "✉️ *Connected Gmail accounts:*\n\n" + "\n".join(lines)
 
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_gmail_menu_keyboard())
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_gmail_menu_keyboard())  # type: ignore
     await callback.answer()
 
 
@@ -57,8 +58,9 @@ async def process_list_accounts(callback: CallbackQuery, db_user: User):
 
 @router.callback_query(F.data == "gmail:add_single")
 async def process_add_single_start(callback: CallbackQuery, state: FSMContext):
+    assert callback.message is not None
     await state.set_state(GmailAuthStates.email_input)
-    await callback.message.edit_text(
+    await callback.message.edit_text(  # type: ignore
         "✉️ *Add Gmail Account — Step 1*\n\nEnter your Gmail address:",
         parse_mode="Markdown",
         reply_markup=get_cancel_keyboard("gmail"),
@@ -68,6 +70,9 @@ async def process_add_single_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(GmailAuthStates.email_input)
 async def process_email_input(message: Message, state: FSMContext):
+    if message.text is None:
+        await message.answer("❌ Please send text.")
+        return
     email = message.text.strip().lower()
     if not EMAIL_REGEX.match(email):
         await message.answer("❌ Invalid email format. Try again:")
@@ -85,6 +90,9 @@ async def process_email_input(message: Message, state: FSMContext):
 
 @router.message(GmailAuthStates.password_input)
 async def process_password_input(message: Message, state: FSMContext, db_user: User):
+    if message.text is None:
+        await message.answer("❌ Please send text.")
+        return
     password = message.text.replace(" ", "").strip()
     if len(password) != 16:
         await message.answer("❌ App Passwords are exactly 16 characters. Try again:")
@@ -119,8 +127,9 @@ async def process_password_input(message: Message, state: FSMContext, db_user: U
 
 @router.callback_query(F.data == "gmail:add_csv")
 async def process_add_csv_start(callback: CallbackQuery, state: FSMContext):
+    assert callback.message is not None
     await state.set_state(GmailAuthStates.csv_upload)
-    await callback.message.edit_text(
+    await callback.message.edit_text(  # type: ignore
         "📂 *Import Gmail accounts from CSV*\n\n"
         "Upload a `.csv` file with two columns:\n"
         "`email,password`\n\n"
@@ -135,15 +144,20 @@ async def process_add_csv_start(callback: CallbackQuery, state: FSMContext):
 @router.message(GmailAuthStates.csv_upload, F.document)
 async def process_csv_upload(message: Message, state: FSMContext, bot: Bot, db_user: User):
     doc = message.document
-    if not doc.file_name.lower().endswith(".csv"):
+    if doc is None:
+        await message.answer("❌ No document attached.")
+        return
+    if doc.file_name is None or not doc.file_name.lower().endswith(".csv"):
         await message.answer("❌ Please upload a `.csv` file.")
         return
-    if doc.file_size > 2 * 1024 * 1024:
+    if doc.file_size is None or doc.file_size > 2 * 1024 * 1024:
         await message.answer("❌ File too large (max 2 MB).")
         return
 
     file_info = await bot.get_file(doc.file_id)
+    assert file_info.file_path is not None
     raw_bytes = await bot.download_file(file_info.file_path)
+    assert raw_bytes is not None
 
     try:
         text_io = io.StringIO(raw_bytes.read().decode("utf-8"))
@@ -196,6 +210,7 @@ async def process_csv_upload(message: Message, state: FSMContext, bot: Bot, db_u
 
 @router.callback_query(F.data == "gmail:remove")
 async def process_remove_start(callback: CallbackQuery, db_user: User):
+    assert callback.message is not None
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(GmailAccount).where(GmailAccount.user_id == db_user.id)
@@ -207,7 +222,7 @@ async def process_remove_start(callback: CallbackQuery, db_user: User):
         return
 
     options = [(acc.email, f"gmail_del:{acc.id}") for acc in accounts]
-    await callback.message.edit_text(
+    await callback.message.edit_text(  # type: ignore
         "🗑 *Remove Account*\n\nSelect the account to delete:",
         parse_mode="Markdown",
         reply_markup=get_dynamic_selection_keyboard(options, "gmail"),
@@ -217,6 +232,10 @@ async def process_remove_start(callback: CallbackQuery, db_user: User):
 
 @router.callback_query(F.data.startswith("gmail_del:"))
 async def process_remove_confirm(callback: CallbackQuery, db_user: User):
+    assert callback.message is not None
+    if callback.data is None:
+        await callback.answer("Invalid data.", show_alert=True)
+        return
     account_id = int(callback.data.split(":")[1])
     async with AsyncSessionLocal() as session:
         acc = await session.get(GmailAccount, account_id)
@@ -224,7 +243,7 @@ async def process_remove_confirm(callback: CallbackQuery, db_user: User):
             email = acc.email
             await session.delete(acc)
             await session.commit()
-            await callback.message.edit_text(
+            await callback.message.edit_text(  # type: ignore
                 f"✅ Account `{email}` removed.",
                 parse_mode="Markdown",
                 reply_markup=get_gmail_menu_keyboard(),
