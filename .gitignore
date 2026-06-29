@@ -30,6 +30,15 @@ logs/
 *.swp
 *.swo
 
+# Test and local runtime artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.coverage.*
+coverage.xml
+.tmp/
+tmp/
+
 # OS files
 .DS_Store
 Thumbs.db

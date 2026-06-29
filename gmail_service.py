@@ -70,14 +70,32 @@ async def send_email(
 
 def test_smtp_credentials(email: str, password: str) -> bool:
     """Synchronously verifies that SMTP login succeeds. Used during account setup."""
+    server = None
     try:
-        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
-        server.ehlo()
-        server.starttls()
+        server = smtplib.SMTP_SSL(settings.SMTP_HOST, 465, timeout=10)
         server.ehlo()
         server.login(email, password)
         server.quit()
         return True
     except Exception as exc:
-        logger.error("SMTP auth check failed for %s: %s", email, exc)
-        return False
+        if server is not None:
+            try:
+                server.quit()
+            except Exception:
+                pass
+        try:
+            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(email, password)
+            server.quit()
+            return True
+        except Exception as retry_exc:
+            if server is not None:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
+            logger.error("SMTP auth check failed for %s: %s | fallback: %s", email, exc, retry_exc)
+            return False
