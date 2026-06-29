@@ -1,7 +1,10 @@
 import asyncio
+import contextlib
 import logging
+import os
 
 from aiogram.exceptions import TelegramNetworkError
+from aiohttp import web
 
 from bot import bot, dp
 from bot.handlers import handlers_router
@@ -28,6 +31,30 @@ async def run_bot():
             await asyncio.sleep(30)
 
 
+async def health_check(request: web.Request) -> web.Response:
+    return web.Response(text="OK")
+
+
+async def run_web_server() -> None:
+    port = int(os.getenv("PORT", "10000"))
+    app = web.Application()
+    app.add_routes([web.get("/", health_check)])
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info("Health check server running on 0.0.0.0:%s", port)
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        logger.info("Shutting down health check server...")
+        await runner.cleanup()
+        raise
+
+
 async def main():
     # 1. Create DB tables
     logger.info("Initialising database…")
@@ -44,7 +71,14 @@ async def main():
     await resume_interrupted_operations()
 
     logger.info("Bot started. Owner ID: %s", settings.OWNER_TELEGRAM_ID)
-    await run_bot()
+
+    server_task = asyncio.create_task(run_web_server())
+    try:
+        await run_bot()
+    finally:
+        server_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await server_task
 
 
 if __name__ == "__main__":
